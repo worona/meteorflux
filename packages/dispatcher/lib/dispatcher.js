@@ -118,7 +118,6 @@ MeteorFlux.Dispatcher.prototype.waitFor = function(ids) {
 */
 MeteorFlux.Dispatcher.prototype.dispatch = function(/* arguments */) {
   var payload = this._curatePayload.apply(this, arguments);
-  var dispatch = this._dispatch;
 
   var dispatchChain = this._dispatchFilters.reduceRight(function (next, filter) {
     return function (dispatch) {
@@ -156,7 +155,11 @@ MeteorFlux.Dispatcher.prototype._dispatch = function(payload) {
 * @param {function} callback
 */
 MeteorFlux.Dispatcher.prototype.addDispatchFilter = function(filter) {
-  this._dispatchFilters.push(filter(this._dispatch.bind(this)));
+  var dispatch = function(/* arguments */) {
+    this._dispatch(this._curatePayload.apply(this, arguments));
+  };
+
+  this._dispatchFilters.push(filter(dispatch.bind(this)));
 };
 
 /**

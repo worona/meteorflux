@@ -490,4 +490,32 @@ Tinytest.add('MeteorFlux - Dispatcher - It should only dipatch if next is called
     dispatcher.dispatch('action', { skip: true });
     dispatcher.dispatch('action', { abort: true });
     test.equal(callbackA.calls.length, 1);
+
+    teardown();
+});
+
+Tinytest.add('MeteorFlux - Dispatcher - Dispach filters can break the filter chain and dispatch prematurely', function (test) {
+    setup();
+
+    dispatcher.register('action', callbackA);
+    dispatcher.register('error', callbackB);
+
+    dispatcher.addDispatchFilter(function (dispatch) {
+        return function (payload, next) {
+            if (payload.error) {
+                dispatch('error', payload.error);
+            } else {
+                next(payload);
+            }
+        }
+    });
+
+    dispatcher.dispatch('action', { some: 'payload' });
+    test.equal(callbackA.calls.length, 1);
+
+    dispatcher.dispatch('action', { error: { message: 'test' }});
+    test.equal(callbackB.calls.length, 1);
+    test.equal(callbackA.calls.length, 1);
+
+    teardown();
 });
