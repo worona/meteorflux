@@ -48,12 +48,16 @@ MeteorFlux.Dispatcher = function(){
 * @return {string}
 */
 MeteorFlux.Dispatcher.prototype.register = function(/* arguments */) {
-  var callback = arguments;
-  for (var i = 0; i < this._registerFilters.length; i++) {
-    callback = this._registerFilters[i].apply(this, callback);
-  }
+  var callback = this._curateCallback.apply(this, arguments);
+
+  var callbackChain = this._registerFilters.reduceRight(function (next, filter) {
+    return function (payload) {
+      return filter(payload, next);
+    }
+  }, callback);
+
   var id = _prefix + _lastID++;
-  this._callbacks[id] = callback[0];
+  this._callbacks[id] = callbackChain;
   return id;
 };
 
@@ -113,18 +117,25 @@ MeteorFlux.Dispatcher.prototype.waitFor = function(ids) {
 * @param {object} payload
 */
 MeteorFlux.Dispatcher.prototype.dispatch = function(/* arguments */) {
+  var payload = this._curatePayload.apply(this, arguments);
+
+  var dispatchChain = this._dispatchFilters.reduceRight(function (next, filter) {
+    return function (dispatch) {
+      return filter(payload, next);
+    }
+  }, this._dispatch.bind(this));
+
+  dispatchChain(payload);
+};
+
+MeteorFlux.Dispatcher.prototype._dispatch = function(payload) {
   invariant(
     !this._isDispatching,
     'dispatcher-cant-dispatch-while-dispatching',
     'Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch.'
   );
-  var payload = arguments;
-  for (var i = 0; i < this._dispatchFilters.length; i++) {
-    payload = this._dispatchFilters[i].apply(this, payload);
-    if (payload === false) return;
-  }
 
-  this._startDispatching.apply(this, payload);
+  this._startDispatching(payload);
   try {
     for (var id in this._callbacks) {
       if (this._isPending[id]) {
@@ -144,7 +155,11 @@ MeteorFlux.Dispatcher.prototype.dispatch = function(/* arguments */) {
 * @param {function} callback
 */
 MeteorFlux.Dispatcher.prototype.addDispatchFilter = function(filter) {
-  this._dispatchFilters.push(filter);
+  var dispatch = function(/* arguments */) {
+    this._dispatch(this._curatePayload.apply(this, arguments));
+  };
+
+  this._dispatchFilters.push(filter(dispatch.bind(this)));
 };
 
 /**
@@ -175,7 +190,7 @@ MeteorFlux.Dispatcher.prototype.isDispatching = function() {
 */
 MeteorFlux.Dispatcher.prototype._invokeCallback = function(id) {
   this._isPending[id] = true;
-  this._callbacks[id].apply(this, this._pendingPayload);
+  this._callbacks[id](this._pendingPayload);
   this._isHandled[id] = true;
 };
 
@@ -185,13 +200,13 @@ MeteorFlux.Dispatcher.prototype._invokeCallback = function(id) {
 * @param {object} payload
 * @internal
 */
-MeteorFlux.Dispatcher.prototype._startDispatching = function(/* arguments */) {
+MeteorFlux.Dispatcher.prototype._startDispatching = function(payload) {
 
   for (var id in this._callbacks) {
     this._isPending[id] = false;
     this._isHandled[id] = false;
   }
-  this._pendingPayload = arguments;
+  this._pendingPayload = payload;
   this._isDispatching = true;
 };
 
@@ -215,9 +230,9 @@ MeteorFlux.Dispatcher.prototype._curatePayload = function(/* arguments */) {
   if (typeof arguments[0] === 'string') {
     var action = arguments[1] || {};
     action.type = arguments[0];
-    return [action];
+    return action;
   } else {
-    return arguments;
+    return arguments[0];
   }
 };
 
@@ -231,12 +246,12 @@ MeteorFlux.Dispatcher.prototype._curateCallback = function(/* arguments */) {
   if (typeof arguments[0] === 'string') {
     var type = arguments[0];
     var func = arguments[1];
-    return [function(action) {
+    return function(action) {
       if (action.type === type)
         func(action);
-    }];
+    };
   } else {
-    return arguments;
+    return arguments[0];
   }
 };
 
@@ -261,5 +276,3 @@ MeteorFlux.Dispatcher.prototype.reset = function() {
 */
 
 Dispatcher = new MeteorFlux.Dispatcher();
-Dispatcher.addDispatchFilter(Dispatcher._curatePayload);
-Dispatcher.addRegisterFilter(Dispatcher._curateCallback);

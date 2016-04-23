@@ -23,8 +23,8 @@ var stringMockCallback = function(action, name) {
     funcs[name] = {};
     funcs[name][action] = [];
 
-    var func = function(action, payload ) {
-        if(funcs[name][action]) {
+    var func = function(payload) {
+        if (payload.type === action && funcs[name][action]) {
             funcs[name][action].push(payload);
         }
     };
@@ -39,8 +39,6 @@ var stringMockCallback = function(action, name) {
 
 var setup = function() {
     dispatcher = new MeteorFlux.Dispatcher();
-    dispatcher.addDispatchFilter(dispatcher._curatePayload);
-    dispatcher.addRegisterFilter(dispatcher._curateCallback);
     callbackA = mockCallback("A");
     callbackB = mockCallback("B");
 };
@@ -85,13 +83,13 @@ Tinytest.add('MeteorFlux - Tests - Test mock string callback functions', functio
     test.equal( typeof callbackA, "function");
     test.equal( typeof callbackA.calls, "object");
 
-    var payload = {};
-    callbackA("actionA", payload);
+    var payload = {type: 'actionA'};
+    callbackA(payload);
     test.equal(callbackA.calls.length, 1);
     test.equal(callbackA.calls[0], payload);
 
-    var payload_2 = {};
-    callbackA("actionA", payload_2);
+    var payload_2 = {type: 'actionA'};
+    callbackA(payload_2);
     test.equal(callbackA.calls.length, 2);
     test.equal(callbackA.calls[1], payload_2);
 
@@ -164,7 +162,6 @@ Tinytest.add('MeteorFlux - Dispatcher - It should execute all subscriber callbac
 
 Tinytest.add('MeteorFlux - Dispatcher - It should execute all subscriber callbacks -String call', function (test) {
     stringSetup();
-
 
     dispatcher.register(callbackA);
     dispatcher.register(callbackB);
@@ -469,25 +466,56 @@ Tinytest.add('MeteorFlux - Dispatcher - It could register with string as first a
     teardown();
 });
 
-Tinytest.add('MeteorFlux - Dispatcher - It should discard dipatches if a dispatch filter returns false', function (test) {
+Tinytest.add('MeteorFlux - Dispatcher - It should only dipatch if next is called in every dispatch filter', function (test) {
     setup();
 
     dispatcher.register('action', callbackA);
-    dispatcher.addDispatchFilter(function (payload) {
-        if (payload.skip === true) {
-            return false;
+    dispatcher.addDispatchFilter(function (dispatch) {
+        return function (payload, next) {
+            if (payload.skip !== true) {
+                next(payload);
+            }
         }
-        return [payload];
     });
 
-    dispatcher.addDispatchFilter(function (payload) {
-        if (payload.abort === true) {
-            return false;
+    dispatcher.addDispatchFilter(function (dispatch) {
+        return function (payload, next) {
+            if (payload.abort !== true) {
+                next(payload);
+            }
         }
-        return [payload];
-    })
+    });
+
     dispatcher.dispatch('action', { some: 'payload' });
     dispatcher.dispatch('action', { skip: true });
     dispatcher.dispatch('action', { abort: true });
     test.equal(callbackA.calls.length, 1);
+
+    teardown();
+});
+
+Tinytest.add('MeteorFlux - Dispatcher - Dispach filters can break the filter chain and dispatch prematurely', function (test) {
+    setup();
+
+    dispatcher.register('action', callbackA);
+    dispatcher.register('error', callbackB);
+
+    dispatcher.addDispatchFilter(function (dispatch) {
+        return function (payload, next) {
+            if (payload.error) {
+                dispatch('error', payload.error);
+            } else {
+                next(payload);
+            }
+        }
+    });
+
+    dispatcher.dispatch('action', { some: 'payload' });
+    test.equal(callbackA.calls.length, 1);
+
+    dispatcher.dispatch('action', { error: { message: 'test' }});
+    test.equal(callbackB.calls.length, 1);
+    test.equal(callbackA.calls.length, 1);
+
+    teardown();
 });
